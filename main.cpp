@@ -19,7 +19,7 @@
 
 #include "Player.hpp"
 
-//COMPILACIÓN: g++ main.cpp -o o -lGL -lGLEW -lglfw -lSOIL -lassimp
+//COMPILACIÓN: g++ main.cpp -o o -lGL -lGLEW -lglfw -lassimp
 
 // --- Variables globales para las texturas ---
 GLuint floorTextureID;

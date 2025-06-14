@@ -1,6 +1,6 @@
 # terrenoypersonaje
 
-/*
+
     Copyright 2025 Adolfo Cárdenas P.
 
     This program is free software: you can redistribute it and/or modify
@@ -15,7 +15,27 @@
 
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
 
 # Personaje_y_terreno_C-_OpenGL
-# Personaje_y_terreno_C-_OpenGL
+
+Character walking on terrain
+
+You need to have a C++ compiler installed on your system. For Linux, I recommend g++.
+
+Please install the following libraries to compile the program:
+
+GLM GLEW GLWF AND LASSIMP
+
+Command to compile on the command line in Linux:
+g++ main.cpp -o o -lGL -lGLEW -lglfw -lassimp
+
+For Linux:
+sudo apt-get install libglew-dev
+sudo apt-get install libglfw3-dev libglfw3
+sudo apt install libglm-dev
+sudo apt-get install libassimp-dev
+
+git clone https://github.com/nothings/stb.git
+sudo cp stb/stb_image.h /usr/local/include/
+
+If you are using Mac or Windows, install according to the recommendations for each system.
