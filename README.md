@@ -30,12 +30,17 @@ Command to compile on the command line in Linux:
 g++ main.cpp -o o -lGL -lGLEW -lglfw -lassimp
 
 For Linux:
+
 sudo apt-get install libglew-dev
+
 sudo apt-get install libglfw3-dev libglfw3
+
 sudo apt install libglm-dev
+
 sudo apt-get install libassimp-dev
 
 git clone https://github.com/nothings/stb.git
+
 sudo cp stb/stb_image.h /usr/local/include/
 
 If you are using Mac or Windows, install according to the recommendations for each system.
