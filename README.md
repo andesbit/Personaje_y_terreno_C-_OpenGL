@@ -16,7 +16,6 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-# Personaje_y_terreno_C-_OpenGL
 
 Character walking on terrain
 
