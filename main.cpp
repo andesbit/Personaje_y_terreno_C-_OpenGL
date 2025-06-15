@@ -16,17 +16,57 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-
 #include "Player.hpp"
-
-//COMPILACIÓN: g++ main.cpp -o o -lGL -lGLEW -lglfw -lassimp
 
 // --- Variables globales para las texturas ---
 GLuint floorTextureID;
 GLuint heightmapTextureID;
 GLuint sandTextureID;
+GLuint rockTextureID;
+GLuint snowTextureID;
 
-// Después de las variables globales como floorTextureID, heightmapTextureID
+//-------NEWOBJ-----
+
+GLuint newObjectTextureID; // ID de la textura para tu PNG
+GLuint newObjectVAO, newObjectVBO; // VAO y VBO para un simple quad (o un modelo más complejo si tienes)
+const char* objectVertexShaderSource = R"(
+    #version 330 core
+    layout (location = 0) in vec3 aPos;
+    layout (location = 4) in vec2 aTexCoords;
+
+    uniform mat4 model;
+    uniform mat4 view;
+    uniform mat4 projection;
+
+    out vec2 TexCoords;
+
+    void main() {
+        gl_Position = projection * view * model * vec4(aPos, 1.0);
+        TexCoords = aTexCoords;
+    }
+)";
+
+// --- ARCHIVO: object_fragment_shader.glsl (o en tu .cpp) ---
+const char* objectFragmentShaderSource = R"(
+    #version 330 core
+    out vec4 FragColor;
+    in vec2 TexCoords;
+
+    uniform sampler2D ourTexture; // La textura del PNG
+    // Si quieres iluminación simple, puedes añadir uniforms de luz aquí también
+    // uniform vec3 lightColor;
+    // uniform float ambientStrength;
+
+    void main() {
+        FragColor = texture(ourTexture, TexCoords); // Simplemente muestra la textura
+        // Si tienes iluminación simple:
+        // vec3 finalColor = texture(ourTexture, TexCoords).rgb * ambientStrength * lightColor;
+        // FragColor = vec4(finalColor, texture(ourTexture, TexCoords).a); // Asegúrate de manejar el canal alfa
+    }
+)";
+//----------------------------------------------------------------------
+
+
 unsigned char* heightmapCpuData = nullptr; 
 int heightmapWidth, heightmapHeight, heightmapNrChannels; // Añade estas líneas
 
@@ -71,13 +111,15 @@ const char* floorVertexShaderSource = R"(
     uniform mat4 model;
     uniform mat4 view;
     uniform mat4 projection;
-
-    uniform sampler2D heightmap;
+    
+    uniform sampler2D heightmap;    
     uniform float heightScale;
+    uniform float sampleDist; // Nuevo uniform
     uniform float terrainYOffset;
     uniform vec2 grassTexRepeat;
 
     out vec3 Normal;
+    out vec3 Normal2;
     out vec3 FragPos;
     out vec2 TexCoords;
 
@@ -90,8 +132,8 @@ const char* floorVertexShaderSource = R"(
         gl_Position = projection * view * model * vec4(newPos, 1.0);
         FragPos = vec3(model * vec4(newPos, 1.0));
 
-        float sampleDist = 0.001; 
-
+        //float sampleDist = 0.001; 
+        float sampleDist2 = 0.0001; 
         // Para evitar problemas con las normales en los bordes del heightmap
         // Se asegura que los muestreos vecinos no se salgan de 0-1
         vec2 uv_clamped = clamp(aTexCoords, vec2(sampleDist, sampleDist), vec2(1.0 - sampleDist, 1.0 - sampleDist));
@@ -107,6 +149,14 @@ const char* floorVertexShaderSource = R"(
         vec3 normal = normalize(vec3(hL - hR, 2.0 * sampleDist, hD - hU)); // (dz para GLSL es 'y' del vector, dy es 'z')
         Normal = mat3(transpose(inverse(model))) * normal;
 
+        hL = texture(heightmap, uv_clamped - vec2(sampleDist2, 0.0)).r * heightScale;
+        hR = texture(heightmap, uv_clamped + vec2(sampleDist2, 0.0)).r * heightScale;
+        hD = texture(heightmap, uv_clamped - vec2(0.0, sampleDist2)).r * heightScale;
+        hU = texture(heightmap, uv_clamped + vec2(0.0, sampleDist2)).r * heightScale;
+        //vec3 normal2 = normalize(vec3(hL - hR, 2.0 * , hD - hU)); // (dz para GLSL es 'y' del vector, dy es 'z')
+        vec3 normal2 = normalize(vec3(hL - hR, 0.02, hD - hU)); // (dz para GLSL es 'y' del vector, dy es 'z')
+        
+        Normal2 = mat3(transpose(inverse(model))) * normal2;
         TexCoords = aTexCoords * grassTexRepeat;
     }
 )";
@@ -114,7 +164,8 @@ const char* floorVertexShaderSource = R"(
 const char* floorFragmentShaderSource = R"(
     #version 330 core
     out vec4 FragColor;
-    in vec3 Normal;
+    in vec3 Normal;    
+    in vec3 Normal2;
     in vec3 FragPos;
     in vec2 TexCoords;
 
@@ -123,35 +174,65 @@ const char* floorFragmentShaderSource = R"(
     
     uniform sampler2D ourTexture;
     uniform sampler2D sandTexture;
+    uniform sampler2D rockTexture;
+    uniform sampler2D snowTexture;
     
     uniform vec3 lightColor;
     uniform float ambientStrength;
     uniform float diffuseStrength;
-
+    
     void main() {
         vec3 norm = normalize(Normal);
+        vec3 norm2 = normalize(Normal2);
         vec3 lightDir = normalize(lightPos - FragPos);
 
+        // Iluminación
         float diff = max(dot(norm, lightDir), 0.0);
         vec3 diffuse = diff * lightColor * diffuseStrength; 
-
         vec3 ambient = ambientStrength * lightColor; 
 
+        // Texturas
         vec3 texColor = texture(ourTexture, TexCoords).rgb;
-        //vec3 sandColor = texture(sandTexture, TexCoords * sandTexRepeat).rgb;
         vec3 sandColor = texture(sandTexture, TexCoords).rgb;
-        
+        vec3 rockColor = texture(rockTexture, TexCoords * 15.0).rgb; // Más tiling para roca
+        vec3 snowColor = texture(snowTexture, TexCoords).rgb;
 
-        vec3 finalColor = texColor; // Color base
-
-        // Mezcla de Hierba/Arena (basada en altura)
-        // Arena en las zonas más bajas
+        // Mezcla arena/hierba (basada en altura)
         float sandBlendFactor = smoothstep(-16.0f, -15.0f, FragPos.y);
-        finalColor = mix(sandColor, finalColor, sandBlendFactor); // Mix arena con hierba/lo que sea que haya
+        vec3 finalColor = mix(sandColor, texColor, sandBlendFactor);
+
+        // --- CÁLCULO CORRECTO PARA ROCA EN PENDIENTES ---
+        //float slope = 1.0 - abs(dot(norm, vec3(0.0, 1.0, 0.0))); // 0=plano, 1=vertical
+        float slope = 1.0 - abs(dot(norm2, vec3(0.0, 1.0, 0.0))); // 0=plano, 1=vertical
+                
+        // Ángulos de transición (en valores de slope, no grados)
+        
+        float rockStartSlope = 1.0-cos(radians(70.0)); // Approx 0.5
+        float rockFullSlope = 1.0-cos(radians(82.0));  // Approx 0.826    
+        
+        float rockBlendFactor = smoothstep(rockStartSlope, rockFullSlope, slope);
+        
+        // Añadir variación con ruido
+        float noise = fract(sin(dot(FragPos.xz, vec2(12.9898, 78.233))) * 43758.5453) * 0.15;
+        rockBlendFactor = clamp(rockBlendFactor + noise, 0.0, 1.0);
+                
+        finalColor = mix(finalColor, rockColor, rockBlendFactor*0.8);
 
 
+         // Mezcla de Nieve (basada en altura, sobre todo lo demás)
+        // Nieve en las zonas más altas
+        //float snowBlendFactor = smoothstep(heightBlendStartSnow, heightBlendEndSnow, FragPos.y);
+        float snowBlendFactor = smoothstep(0.0f, 1.0f, FragPos.y);
+        finalColor = mix(finalColor, snowColor, snowBlendFactor); // Mezcla nieve con lo que ya tenías
+
+
+
+        // Resultado con iluminación
+        
+        //FragColor = vec4(slope, slope, slope, 1.0);
         FragColor = vec4(finalColor * (ambient + diffuse), 1.0);
-    }
+        //FragColor = vec4(normalize(Normal) * 0.5 + 0.5, 1.0);//para ver las normales directamente
+    }   
 )";
 
 // Funciones para generar la malla del terreno ---
@@ -367,6 +448,17 @@ int main()
     checkGLError("Floor Shader Program Setup");
     // --- End Floor Shader Program Setup ---
 
+
+
+
+
+//----------------------------------------------
+    int imgWidth, imgHeight, imgNrChannels;
+//-----------------------------------------------
+
+
+
+
     // --- CAMBIO: Generación de la malla del terreno (vértices e índices) ---
     // Puedes ajustar estos valores para cambiar el tamaño y detalle del terreno
     int terrainResolutionX = 256; // Por ejemplo, un vértice por píxel del heightmap si es 256x256
@@ -377,7 +469,7 @@ int main()
 
 
     // Para la escala de altura, usa el mismo valor que pasas al shader (0.5f)
-    float currentHeightScale = 10.0f; // Declara esta variable y úsala para el shader también
+    float currentHeightScale = 30.0f; // Declara esta variable y úsala para el shader también
 
     // Calcula la altura inicial del terreno en el centro (0,0) donde quieres que empiece el personaje
     float initialTerrainHeight = getTerrainHeight(
@@ -451,8 +543,86 @@ int main()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     checkGLError("glTexParameter for floor");
 
-    int imgWidth, imgHeight, imgNrChannels;
-    unsigned char *data = stbi_load("Resources/grass.png", &imgWidth, &imgHeight, &imgNrChannels, 0);
+
+
+
+
+
+//-------NEWOBJ-----
+
+
+
+  GLuint objectVertexShader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(objectVertexShader, 1, &objectVertexShaderSource, nullptr);
+    glCompileShader(objectVertexShader);
+    checkShaderCompileErrors(objectVertexShader, "OBJECT_VERTEX");
+
+    GLuint objectFragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(objectFragmentShader, 1, &objectFragmentShaderSource, nullptr);
+    glCompileShader(objectFragmentShader);
+    checkShaderCompileErrors(objectFragmentShader, "OBJECT_FRAGMENT");
+
+    GLuint objectShaderProgram = glCreateProgram();
+    glAttachShader(objectShaderProgram, objectVertexShader);
+    glAttachShader(objectShaderProgram, objectFragmentShader);
+    glLinkProgram(objectShaderProgram);
+    checkShaderCompileErrors(objectShaderProgram, "OBJECT_PROGRAM");
+
+    glDeleteShader(objectVertexShader);
+    glDeleteShader(objectFragmentShader);
+    checkGLError("Object Shader Program Setup");
+
+
+
+
+   
+
+  
+
+//-----------------------------------------------------------
+
+
+
+
+//-------NEWOBJ-----
+
+ // Crear un simple quad para el PNG
+    float quadVertices[] = {
+        // Posiciones        // Coordenadas de Textura
+        -0.5f, -0.5f, 0.0f,  0.0f, 0.0f, // Bottom-left
+         0.5f, -0.5f, 0.0f,  1.0f, 0.0f, // Bottom-right
+         0.5f,  0.5f, 0.0f,  1.0f, 1.0f, // Top-right
+        -0.5f,  0.5f, 0.0f,  0.0f, 1.0f  // Top-left
+    };
+    unsigned int quadIndices[] = {
+        0, 1, 2, // Primer triángulo
+        2, 3, 0  // Segundo triángulo
+    };
+
+    glGenVertexArrays(1, &newObjectVAO);
+    glGenBuffers(1, &newObjectVBO);
+    // Para el quad simple, usaremos GL_ARRAY_BUFFER. Si quieres EBO, necesitarías glGenBuffers(1, &newObjectEBO);
+    // y glBufferData(GL_ELEMENT_ARRAY_BUFFER, ...). Para un quad de 4 vértices, no es estrictamente necesario EBO.
+
+    glBindVertexArray(newObjectVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, newObjectVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), quadVertices, GL_STATIC_DRAW);
+
+    // Atributos de vértice para el quad (posición y coordenadas de textura)
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(4, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float))); // Asumiendo location 4 para TexCoords
+    glEnableVertexAttribArray(4);
+
+    glBindVertexArray(0); // Desenlazar VAO
+
+
+
+
+
+    
+
+    unsigned char *data = stbi_load("Resources/grass2.png", &imgWidth, &imgHeight, &imgNrChannels, 0);
     if (data)
     {
         GLenum format = GL_RGB;
@@ -470,6 +640,41 @@ int main()
         std::cerr << "Failed to load floor texture: Resources/grass.png. Using solid color or default." << std::endl;
     }
     checkGLError("Texture loading for floor");
+
+
+//-------NEWOBJ-----
+ // Cargar la nueva textura PNG para el objeto
+    glGenTextures(1, &newObjectTextureID);
+    glBindTexture(GL_TEXTURE_2D, newObjectTextureID);
+
+    // Parámetros de textura (puedes ajustar según necesites)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); // Clamp para que no se repita
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    // Cargar los datos de la imagen PNG
+    unsigned char *object_data = stbi_load("Resources/coco.png", &imgWidth, &imgHeight, &imgNrChannels, 0);
+    if (object_data)
+    {
+        GLenum format = GL_RGB;
+        if (imgNrChannels == 4) format = GL_RGBA; // Si tu PNG tiene transparencia
+        else if (imgNrChannels == 3) format = GL_RGB;
+        else if (imgNrChannels == 1) format = GL_RED;
+
+        glTexImage2D(GL_TEXTURE_2D, 0, format, imgWidth, imgHeight, 0, format, GL_UNSIGNED_BYTE, object_data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        stbi_image_free(object_data);
+        std::cout << "New object texture loaded: Resources/coco.png" << std::endl;
+    }
+    else
+    {
+        std::cerr << "Failed to load new object texture: Resources/coco.png. Using default or solid color." << std::endl;
+    }
+    checkGLError("New object texture loading");
+
+
+
 
 
 
@@ -493,6 +698,47 @@ int main()
     } else { /* Error handling */ }
     checkGLError("sand Texture Loading");
 
+    // Cargar Rock Texture
+    glGenTextures(1, &rockTextureID);
+    glBindTexture(GL_TEXTURE_2D, rockTextureID);
+    // Configurar parámetros (GL_REPEAT, GL_LINEAR_MIPMAP_LINEAR, etc.)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    // Cargar datos de la imagen (ej. Resources/rock.png)
+    
+    unsigned char *rock_data = stbi_load("Resources/rock.png", &imgWidth, &imgHeight, &imgNrChannels, 0);
+    if (rock_data) {
+        GLenum format = GL_RGB; // Ajusta según el formato de tu imagen
+        if (imgNrChannels == 4) format = GL_RGBA;
+        glTexImage2D(GL_TEXTURE_2D, 0, format, imgWidth, imgHeight, 0, format, GL_UNSIGNED_BYTE, rock_data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        stbi_image_free(rock_data);
+        std::cout << "Rock texture loaded: Resources/rock.png" << std::endl;
+    } else { /* Error handling */ }
+    checkGLError("Rock Texture Loading");
+
+
+    // Cargar Snow Texture
+    glGenTextures(1, &snowTextureID);
+    glBindTexture(GL_TEXTURE_2D, snowTextureID);
+    // Configurar parámetros (GL_REPEAT, GL_LINEAR_MIPMAP_LINEAR, etc.)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    // Cargar datos de la imagen (ej. Resources/snow.png)
+    unsigned char *snow_data = stbi_load("Resources/snow.png", &imgWidth, &imgHeight, &imgNrChannels, 0);
+    if (snow_data) {
+        GLenum format = GL_RGB; // Ajusta según el formato de tu imagen
+        if (imgNrChannels == 4) format = GL_RGBA;
+        glTexImage2D(GL_TEXTURE_2D, 0, format, imgWidth, imgHeight, 0, format, GL_UNSIGNED_BYTE, snow_data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        stbi_image_free(snow_data);
+        std::cout << "snow texture loaded: Resources/snow.png" << std::endl;
+    } else { /* Error handling */ }
+    checkGLError("snow Texture Loading");
 
 
     // --- Carga del Heightmap (heightmap.png) ---
@@ -522,6 +768,11 @@ int main()
         std::cerr << "Failed to load heightmap: heightmap.png. Make sure it's in the program directory." << std::endl;
     }
     checkGLError("Heightmap texture loading");
+
+    
+    //float heightmapPixelSize = 1.0f / heightmapWidth; // Asumiendo width = height para simplificar
+    
+    float heightmapPixelSize = 1.0f / heightmapWidth;//Produce normales más suaves y realistas.
 
     // Establece la posición inicial del personaje en X=0, Z=0 y la altura Y del terreno
     // Agrega un pequeño offset (+0.5f o +1.0f) si el pivote de tu modelo no está en la base de los pies.
@@ -605,6 +856,8 @@ int main()
         float diffuseStrength = 0.8f;
 
 
+
+
         // --- Dibujar el personaje principal (controlable) ---
         glUseProgram(playerCharacter->shaderProgram); 
         checkGLError("glUseProgram for player character");
@@ -660,11 +913,19 @@ int main()
         glBindTexture(GL_TEXTURE_2D, sandTextureID);
         glUniform1i(glGetUniformLocation(floorShaderProgram, "sandTexture"), 2);
 
+        glActiveTexture(GL_TEXTURE3); // Unidad 3 para la roca
+        glBindTexture(GL_TEXTURE_2D, rockTextureID);
+        glUniform1i(glGetUniformLocation(floorShaderProgram, "rockTexture"), 3);
+        glUniform1f(glGetUniformLocation(floorShaderProgram, "sampleDist"), heightmapPixelSize);
+
+        glActiveTexture(GL_TEXTURE4); // Unidad 4 para la nieve
+        glBindTexture(GL_TEXTURE_2D, snowTextureID);
+        glUniform1i(glGetUniformLocation(floorShaderProgram, "snowTexture"), 4);
 
         // Uniforms de escala para el heightmap y repetición de hierba
         glUniform1f(glGetUniformLocation(floorShaderProgram, "heightScale"),  currentHeightScale);//;40.0f); // Puedes ajustar este valor
         glUniform1f(glGetUniformLocation(floorShaderProgram, "terrainYOffset"), -16.01f);
-        glUniform2f(glGetUniformLocation(floorShaderProgram, "grassTexRepeat"), 4.0f, 4.0f); // Ajustado para un terreno 100x100
+        glUniform2f(glGetUniformLocation(floorShaderProgram, "grassTexRepeat"), 24.0f, 24.0f); // Ajustado para un terreno 100x100
         checkGLError("Uniforms for floor");
 
         glBindVertexArray(floorVAO);
@@ -678,6 +939,63 @@ int main()
         glBindTexture(GL_TEXTURE_2D, 0); 
         checkGLError("Unbind VAO/Texture for floor");
 
+
+
+//-------NEWOBJ-----
+///*
+        // --- Posición del nuevo objeto PNG ---
+        glm::vec3 objectPosXZ = glm::vec3(10.0f, 0.0f, 10.0f); // Posición X y Z deseadas
+        // Usa getTerrainHeight para obtener la altura Y en esa posición
+  
+        float objectY = getTerrainHeight(
+            objectPosXZ.x,
+            objectPosXZ.z,
+            terrainWidth,          // Variable que define el ancho del terreno
+            terrainDepth,          // Variable que define la profundidad del terreno
+            terrainBaseY,          // Variable que define el offset Y base
+            currentHeightScale,    // ¡IMPORTANTE! Usar la misma currentHeightScale que en el shader
+            heightmapCpuData,      // Los datos de la imagen del heightmap
+            heightmapWidth,
+            heightmapHeight,
+            heightmapNrChannels
+        );
+        
+        // Añade un pequeño offset para que no quede enterrado o "flote" justo en la superficie
+        objectY += 0.01f; // Ajusta este valor si el objeto se ve hundido o flotando
+
+        // --- Dibujar el nuevo objeto PNG ---
+        glUseProgram(objectShaderProgram); // Activa el shader del objeto
+        checkGLError("glUseProgram for new object");
+
+        glm::mat4 objectModelMat = glm::mat4(1.0f);
+        objectModelMat = glm::translate(objectModelMat, glm::vec3(objectPosXZ.x, objectY, objectPosXZ.z));
+        objectModelMat = glm::rotate(objectModelMat, glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // Si es un quad vertical
+        objectModelMat = glm::scale(objectModelMat, glm::vec3(5.0f)); // Ajusta el tamaño del PNG
+
+        glUniformMatrix4fv(glGetUniformLocation(objectShaderProgram, "model"), 1, GL_FALSE, glm::value_ptr(objectModelMat));
+        glUniformMatrix4fv(glGetUniformLocation(objectShaderProgram, "view"), 1, GL_FALSE, glm::value_ptr(view));
+        glUniformMatrix4fv(glGetUniformLocation(objectShaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
+        
+        glActiveTexture(GL_TEXTURE0); // Usar la unidad de textura 0 para el objeto
+        glBindTexture(GL_TEXTURE_2D, newObjectTextureID);
+        glUniform1i(glGetUniformLocation(objectShaderProgram, "ourTexture"), 0);
+
+        glBindVertexArray(newObjectVAO);
+        // Usar glDrawArrays para un quad de 4 vértices sin EBO
+        glDrawArrays(GL_TRIANGLE_FAN, 0, 4); // O GL_TRIANGLES si usaste índices para el quad
+        // Si creaste un EBO para el quad: glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+
+        checkGLError("glDrawArrays for new object");
+        
+        glBindVertexArray(0); // Desenlazar VAO
+        glBindTexture(GL_TEXTURE_2D, 0); // Desenlazar textura
+
+//*/
+
+
+
+
+
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
@@ -690,6 +1008,7 @@ int main()
     glDeleteBuffers(1, &floorEBO);
     glDeleteTextures(1, &floorTextureID); 
     glDeleteTextures(1, &sandTextureID); 
+    glDeleteTextures(1, &rockTextureID); 
     glDeleteTextures(1, &heightmapTextureID);
     checkGLError("Freeing floor resources");
 
@@ -698,7 +1017,18 @@ int main()
         std::cout << "Heightmap CPU data freed." << std::endl;
     }
 
+
+//-------NEWOBJ-----
+    glDeleteProgram(objectShaderProgram);
+    glDeleteVertexArrays(1, &newObjectVAO);
+    glDeleteBuffers(1, &newObjectVBO);
+    glDeleteTextures(1, &newObjectTextureID);
+
+
+
     glfwTerminate();
     std::cout << "Main: GLFW terminated." << std::endl;
     return 0;
 }
+
+

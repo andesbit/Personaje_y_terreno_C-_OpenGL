@@ -23,7 +23,7 @@ You need to have a C++ compiler installed on your system. For Linux, I recommend
 
 Please install the following libraries to compile the program:
 
-GLM GLEW GLWF AND LASSIMP
+GLM GLEW GLWF LASSIMP
 
 Command to compile on the command line in Linux:
 g++ main.cpp -o o -lGL -lGLEW -lglfw -lassimp
