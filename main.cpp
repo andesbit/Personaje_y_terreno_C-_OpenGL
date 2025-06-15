@@ -29,6 +29,10 @@ GLuint snowTextureID;
 
 GLuint newObjectTextureID; // ID de la textura para tu PNG
 GLuint newObjectVAO, newObjectVBO; // VAO y VBO para un simple quad (o un modelo más complejo si tienes)
+
+GLuint modelArbolTextureID; // ID de la textura para tu PNG
+//GLuint modelArbolVAO, modelArbolVBO; 
+
 const char* objectVertexShaderSource = R"(
     #version 330 core
     layout (location = 0) in vec3 aPos;
@@ -59,6 +63,13 @@ const char* objectFragmentShaderSource = R"(
 
     void main() {
         FragColor = texture(ourTexture, TexCoords); // Simplemente muestra la textura
+
+        //NOFUNCO ASEGURANDO LA TRANSPARENCIA(ya la mostraba bien)
+        //vec4 color = texture(ourTexture, TexCoord);
+        //if (color.a > 0.1)  // Si es casi transparente, descártalo
+          //  discard;
+        //FragColor = color;
+
         // Si tienes iluminación simple:
         // vec3 finalColor = texture(ourTexture, TexCoords).rgb * ambientStrength * lightColor;
         // FragColor = vec4(finalColor, texture(ourTexture, TexCoords).a); // Asegúrate de manejar el canal alfa
@@ -82,7 +93,7 @@ void checkGLError(const std::string& stage) {
         std::cerr << "OpenGL Error at " << stage << ": " << err << std::endl;
     }
 }
-
+/*
 // Función para verificar errores de compilación/linkeo de shaders
 void checkShaderCompileErrors(GLuint shader, std::string type) {
     GLint success;
@@ -101,7 +112,28 @@ void checkShaderCompileErrors(GLuint shader, std::string type) {
         }
     }
 }
-
+*/
+void checkShaderCompileErrors(GLuint shaderOrProgram, const std::string& type) {
+    GLint success;
+    GLchar infoLog[1024];
+    
+    if (type == "VERTEX" || type == "FRAGMENT" || type == "GEOMETRY") {
+        glGetShaderiv(shaderOrProgram, GL_COMPILE_STATUS, &success);
+        if (!success) {
+            glGetShaderInfoLog(shaderOrProgram, sizeof(infoLog), NULL, infoLog);
+            std::cerr << "ERROR::SHADER_COMPILATION (" << type << ")\n" 
+                      << infoLog << "\n--------------------------------------" << std::endl;
+        }
+    } 
+    else if (type == "PROGRAM") {
+        glGetProgramiv(shaderOrProgram, GL_LINK_STATUS, &success);
+        if (!success) {
+            glGetProgramInfoLog(shaderOrProgram, sizeof(infoLog), NULL, infoLog);
+            std::cerr << "ERROR::SHADER_PROGRAM_LINKING\n" 
+                      << infoLog << "\n--------------------------------------" << std::endl;
+        }
+    }
+}
 const char* floorVertexShaderSource = R"(
     #version 330 core
     layout (location = 0) in vec3 aPos;
@@ -235,6 +267,55 @@ const char* floorFragmentShaderSource = R"(
     }   
 )";
 
+
+
+
+GLuint cargarTextura(const char* archivo) {
+    GLuint texturaID;
+    glGenTextures(1, &texturaID);
+    
+    int ancho, alto, nrCanales;
+    unsigned char* datos = stbi_load(archivo, &ancho, &alto, &nrCanales, 0);
+    
+    if(datos) {
+        GLenum formato = (nrCanales == 4) ? GL_RGBA : GL_RGB;
+        
+        glBindTexture(GL_TEXTURE_2D, texturaID);
+        glTexImage2D(GL_TEXTURE_2D, 0, formato, ancho, alto, 0, formato, GL_UNSIGNED_BYTE, datos);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        
+        stbi_image_free(datos);
+    } else {
+        std::cerr << "Error al cargar la textura: " << archivo << std::endl;
+    }
+    
+    return texturaID;
+}
+
+
+GLuint compileShader(GLenum type, const char* source) {
+    GLuint shader = glCreateShader(type);
+    glShaderSource(shader, 1, &source, NULL);
+    glCompileShader(shader);
+    
+    // Check compilation status
+    GLint success;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+    if(!success) {
+        GLchar infoLog[512];
+        glGetShaderInfoLog(shader, 512, NULL, infoLog);
+        std::cerr << "ERROR::SHADER::COMPILATION_FAILED\n" << infoLog << std::endl;
+    }
+    
+    return shader;
+}
+
+
 // Funciones para generar la malla del terreno ---
 // Genera una cuadrícula de vértices para el terreno
 std::vector<float> generateTerrainGridVertices(int resolutionX, int resolutionZ, float terrainSizeX, float terrainSizeZ, float baseHeight) {
@@ -361,6 +442,9 @@ float getTerrainHeight(float worldX, float worldZ, float terrainWidth, float ter
 // Main function
 int main()
 {
+    // Inicializa el generador de números aleatorios
+    srand(time(0));
+
     std::cout << "Main: Starting GLFW initialization." << std::endl;
     if (!glfwInit()) {
         std::cerr << "Failed to initialize GLFW" << std::endl;
@@ -551,7 +635,7 @@ int main()
 //-------NEWOBJ-----
 
 
-
+/*
   GLuint objectVertexShader = glCreateShader(GL_VERTEX_SHADER);
     glShaderSource(objectVertexShader, 1, &objectVertexShaderSource, nullptr);
     glCompileShader(objectVertexShader);
@@ -561,12 +645,29 @@ int main()
     glShaderSource(objectFragmentShader, 1, &objectFragmentShaderSource, nullptr);
     glCompileShader(objectFragmentShader);
     checkShaderCompileErrors(objectFragmentShader, "OBJECT_FRAGMENT");
+*/
+    GLuint objectVertexShader = compileShader(GL_VERTEX_SHADER, objectVertexShaderSource);
+    GLuint objectFragmentShader = compileShader(GL_FRAGMENT_SHADER, objectFragmentShaderSource);
+
 
     GLuint objectShaderProgram = glCreateProgram();
     glAttachShader(objectShaderProgram, objectVertexShader);
     glAttachShader(objectShaderProgram, objectFragmentShader);
+
     glLinkProgram(objectShaderProgram);
-    checkShaderCompileErrors(objectShaderProgram, "OBJECT_PROGRAM");
+
+
+//glLinkProgram(program);
+/*
+GLint success;
+glGetProgramiv(objectShaderProgram, GL_LINK_STATUS, &success);
+if(!success) {
+    GLchar infoLog[512];
+    glGetProgramInfoLog(objectShaderProgram, 512, NULL, infoLog);
+    std::cerr << "ERROR::>>>PROGRAM::LINKING_FAILED\n" << infoLog << std::endl;
+}
+*/
+    checkShaderCompileErrors(objectShaderProgram, "PROGRAM");
 
     glDeleteShader(objectVertexShader);
     glDeleteShader(objectFragmentShader);
@@ -617,9 +718,27 @@ int main()
     glBindVertexArray(0); // Desenlazar VAO
 
 
+//_____----------------------------
+/*std::vector<glm::vec3> posiciones = {
+    glm::vec3(0.0f, 0.0f, 0.0f),   // Objeto 1
+    glm::vec3(2.0f, 0.0f, 1.0f),    // Objeto 2
+    glm::vec3(-1.5f, 0.0f, 3.0f),   // Objeto 3
+    glm::vec3(4.0f, 0.0f, -2.0f),   // Objeto 4
+    // ... Añade las demás posiciones
+};
+*/
 
-
-
+// Posiciones aleatorias para 10 árboles///
+//(rand() % (max - min + 1)) + min
+//(rand() % (100 - (-100) + 1)) + (-100);
+//(rand() % (201)) -100;
+std::vector<glm::vec3> arboles_pos;
+int num_arboles = 200;
+for (int i = 0; i < num_arboles; i++) {
+    float x = (rand() % (401)) -400; //rand() % 20 - 10;  // Entre -10 y 10
+    float z = (rand() % (401)) -400;
+    arboles_pos.push_back(glm::vec3(x, -8.0f, z));
+}
     
 
     unsigned char *data = stbi_load("Resources/grass2.png", &imgWidth, &imgHeight, &imgNrChannels, 0);
@@ -643,6 +762,12 @@ int main()
 
 
 //-------NEWOBJ-----
+newObjectTextureID = cargarTextura("Resources/coco.png") ;
+
+//arbol----------------------
+modelArbolTextureID = cargarTextura("Resources/arbol.png") ; // ID de la textura para tu PNG
+
+/*
  // Cargar la nueva textura PNG para el objeto
     glGenTextures(1, &newObjectTextureID);
     glBindTexture(GL_TEXTURE_2D, newObjectTextureID);
@@ -672,7 +797,7 @@ int main()
         std::cerr << "Failed to load new object texture: Resources/coco.png. Using default or solid color." << std::endl;
     }
     checkGLError("New object texture loading");
-
+*/
 
 
 
@@ -969,8 +1094,17 @@ int main()
 
         glm::mat4 objectModelMat = glm::mat4(1.0f);
         objectModelMat = glm::translate(objectModelMat, glm::vec3(objectPosXZ.x, objectY, objectPosXZ.z));
-        objectModelMat = glm::rotate(objectModelMat, glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // Si es un quad vertical
+       // objectModelMat = glm::rotate(objectModelMat, glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // Si es un quad vertical
         objectModelMat = glm::scale(objectModelMat, glm::vec3(5.0f)); // Ajusta el tamaño del PNG
+
+/*
+glm::mat4 model = glm::mat4(1.0f);
+model = glm::translate(model, glm::vec3(posX, posY, posZ)); // Posición donde quieres colocarla
+model = glm::rotate(model, glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // Rota 90° en X para que quede vertical
+model = glm::scale(model, glm::vec3(escalaX, escalaY, escalaZ)); // Ajusta el tamaño
+*/
+
+
 
         glUniformMatrix4fv(glGetUniformLocation(objectShaderProgram, "model"), 1, GL_FALSE, glm::value_ptr(objectModelMat));
         glUniformMatrix4fv(glGetUniformLocation(objectShaderProgram, "view"), 1, GL_FALSE, glm::value_ptr(view));
@@ -980,6 +1114,11 @@ int main()
         glBindTexture(GL_TEXTURE_2D, newObjectTextureID);
         glUniform1i(glGetUniformLocation(objectShaderProgram, "ourTexture"), 0);
 
+
+glEnable(GL_BLEND);
+glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); // Fórmula estándar para transparencias
+
+
         glBindVertexArray(newObjectVAO);
         // Usar glDrawArrays para un quad de 4 vértices sin EBO
         glDrawArrays(GL_TRIANGLE_FAN, 0, 4); // O GL_TRIANGLES si usaste índices para el quad
@@ -987,10 +1126,74 @@ int main()
 
         checkGLError("glDrawArrays for new object");
         
-        glBindVertexArray(0); // Desenlazar VAO
+        //ABAJOSESIGUEUSANDOELMISMOVAO  glBindVertexArray(0); // Desenlazar VAO
         glBindTexture(GL_TEXTURE_2D, 0); // Desenlazar textura
 
 //*/
+
+
+
+
+////USARELDEARRIBA    glBindVertexArray(newObjectVAO);
+    //glEnable(GL_BLEND);  // Para transparencia
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    //glBindTexture(GL_TEXTURE_2D, tuTexturaPNG);  // Usa la textura PNG
+    glBindTexture(GL_TEXTURE_2D, modelArbolTextureID);
+
+    for (const auto& pos : arboles_pos) {
+        glm::mat4 model = glm::mat4(1.0f);
+
+
+glm::vec3 oo = pos;
+ oo.y =  getTerrainHeight(
+            oo.x,
+            oo.z,
+            terrainWidth,          // Variable que define el ancho del terreno
+            terrainDepth,          // Variable que define la profundidad del terreno
+            terrainBaseY,          // Variable que define el offset Y base
+            currentHeightScale,    // ¡IMPORTANTE! Usar la misma currentHeightScale que en el shader
+            heightmapCpuData,      // Los datos de la imagen del heightmap
+            heightmapWidth,
+            heightmapHeight,
+            heightmapNrChannels
+        );
+
+
+
+
+        model = glm::translate(model, oo);  // Posición del objeto
+        model = glm::rotate(model, glm::radians(180.0f), glm::vec3(1.0f, 0.0f, 0.0f));  // Rotación vertical
+        model = glm::scale(model, glm::vec3(10.0f));  // Escala (ajústala)
+        
+        // Pasa la matriz "model" al shader
+        glUniformMatrix4fv(glGetUniformLocation(objectShaderProgram, "model"), 1, GL_FALSE, glm::value_ptr(model));
+
+     //   glDrawArrays(GL_TRIANGLES, 0, 6);
+    //}
+      //  
+    
+    // Dibuja el quad (rectángulo con la textura)
+    //    glBindVertexArray(quadVAO);  // Asume que ya tienes un VAO para un quad
+
+//glBindVertexArray(newObjectVAO);
+
+      //funciono raro...glDrawArrays(GL_TRIANGLES, 0, 6);
+      glDrawArrays(GL_TRIANGLE_FAN, 0, 4); // O GL_TRIANGLES si usaste índices para el quad
+    }
+    glBindVertexArray(0); // Desenlazar VAO
+/*OPCIONAL MUCHOS OBJETOS MAS OPTIMO
+// Configura un buffer con las matrices de modelo
+GLuint instanceVBO;
+glGenBuffers(1, &instanceVBO);
+glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
+glBufferData(GL_ARRAY_BUFFER, sizeof(glm::mat4) * posiciones.size(), &modelMatrices[0], GL_STATIC_DRAW);
+
+// Dibuja todos los objetos en una llamada
+glBindVertexArray(quadVAO);
+glDrawArraysInstanced(GL_TRIANGLES, 0, 6, posiciones.size());
+*/
+//-------------------------------
 
 
 
